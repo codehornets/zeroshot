@@ -58,12 +58,12 @@ function buildContext({
   context += `- If unsure between "fix the code" vs "relax the rules" → ALWAYS fix the code\n`;
   context += `- If unsure between "do more" vs "do less" → ALWAYS do what's required, nothing more\n\n`;
 
-  // MINIMAL OUTPUT - No verbose prose for background agents
-  context += `## 📝 OUTPUT STYLE - MINIMAL\n\n`;
-  context += `You are a background agent. The human CANNOT interact with you.\n`;
-  context += `- NO explanatory prose ("Let me explain...", "I'll now...")\n`;
-  context += `- NO step-by-step narration\n`;
-  context += `- YES: Brief status updates ("Implementing auth", "Fixed 3 errors")\n`;
+  // INFORMATIVE OUTPUT - Keep human informed of progress
+  context += `## 📝 OUTPUT STYLE - INFORMATIVE\n\n`;
+  context += `You are a background agent. Keep the human informed of progress.\n`;
+  context += `- NO asking questions or waiting for approval\n`;
+  context += `- NO excessive repetition of the same information\n`;
+  context += `- YES: Say what you're doing ("Reading auth.ts", "Adding validation", "Running tests")\n`;
   context += `- YES: Error reports with actionable info\n`;
   context += `- YES: Final summary of changes made\n\n`;
 
