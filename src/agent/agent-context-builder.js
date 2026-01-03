@@ -58,14 +58,22 @@ function buildContext({
   context += `- If unsure between "fix the code" vs "relax the rules" → ALWAYS fix the code\n`;
   context += `- If unsure between "do more" vs "do less" → ALWAYS do what's required, nothing more\n\n`;
 
-  // INFORMATIVE OUTPUT - Keep human informed of progress
-  context += `## 📝 OUTPUT STYLE - INFORMATIVE\n\n`;
-  context += `You are a background agent. Keep the human informed of progress.\n`;
-  context += `- NO asking questions or waiting for approval\n`;
-  context += `- NO excessive repetition of the same information\n`;
-  context += `- YES: Say what you're doing ("Reading auth.ts", "Adding validation", "Running tests")\n`;
-  context += `- YES: Error reports with actionable info\n`;
-  context += `- YES: Final summary of changes made\n\n`;
+  // OUTPUT STYLE - NON-NEGOTIABLE
+  context += `## 🔴 OUTPUT STYLE - NON-NEGOTIABLE\n\n`;
+  context += `**ALL OUTPUT: Maximum informativeness, minimum verbosity. NO EXCEPTIONS.**\n\n`;
+  context += `This applies to EVERYTHING you output:\n`;
+  context += `- Text responses\n`;
+  context += `- JSON schema values\n`;
+  context += `- Reasoning fields\n`;
+  context += `- Summary fields\n`;
+  context += `- ALL string values in structured output\n\n`;
+  context += `Rules:\n`;
+  context += `- Progress: "Reading auth.ts" NOT "I will now read the auth.ts file..."\n`;
+  context += `- Tool calls: NO preamble. Call immediately.\n`;
+  context += `- Schema strings: Dense facts. No filler. No fluff.\n`;
+  context += `- Errors: DETAILED (stack traces, repro). NEVER compress errors.\n`;
+  context += `- FORBIDDEN: "I'll help...", "Let me...", "I'm going to...", "Sure!", "Great!", "Certainly!"\n\n`;
+  context += `Every token costs money. Waste nothing.\n\n`;
 
   // GIT OPERATIONS RESTRICTION - Only when NOT running in isolation mode
   // When isolated (worktree or Docker), agents CAN commit/push safely
@@ -95,19 +103,17 @@ function buildContext({
     );
   }
 
-  // Handle legacy outputFormat in prompt object (separate from iteration-based prompt selection)
+  // Output format schema (if configured)
   if (config.prompt?.outputFormat) {
-    context += `## Output Format (REQUIRED)\n\n`;
-    context += `After completing your task, you MUST output a JSON block:\n\n`;
+    context += `## Output Schema (REQUIRED)\n\n`;
     context += `\`\`\`json\n${JSON.stringify(config.prompt.outputFormat.example, null, 2)}\n\`\`\`\n\n`;
-
+    context += `STRING VALUES IN THIS SCHEMA: Dense. Factual. No filler words. No pleasantries.\n`;
     if (config.prompt.outputFormat.rules) {
-      context += `IMPORTANT:\n`;
       for (const rule of config.prompt.outputFormat.rules) {
         context += `- ${rule}\n`;
       }
-      context += '\n';
     }
+    context += '\n';
   }
 
   // Add sources
