@@ -1,3 +1,10 @@
+## [4.1.1](https://github.com/covibes/zeroshot/compare/v4.1.0...v4.1.1) (2026-01-05)
+
+
+### Bug Fixes
+
+* **docker:** change default containerHome from /root to /home/node ([7195539](https://github.com/covibes/zeroshot/commit/71955397d727126525d36f6964980abd0ac1e94c))
+
 # [4.1.0](https://github.com/covibes/zeroshot/compare/v4.0.0...v4.1.0) (2026-01-05)
 
 
