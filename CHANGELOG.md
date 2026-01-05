@@ -1,3 +1,10 @@
+## [4.1.2](https://github.com/covibes/zeroshot/compare/v4.1.1...v4.1.2) (2026-01-05)
+
+
+### Bug Fixes
+
+* **orchestrator:** prevent subscription race condition (issue [#31](https://github.com/covibes/zeroshot/issues/31)) ([9a41bf1](https://github.com/covibes/zeroshot/commit/9a41bf1ba9ccdac0f1653eba9d208c6de4028dbe))
+
 ## [4.1.1](https://github.com/covibes/zeroshot/compare/v4.1.0...v4.1.1) (2026-01-05)
 
 
