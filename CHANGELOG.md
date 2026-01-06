@@ -1,3 +1,10 @@
+# [4.2.0](https://github.com/covibes/zeroshot/compare/v4.1.4...v4.2.0) (2026-01-06)
+
+
+### Features
+
+* **security:** add automated security scanning and dependency management ([7b6ae13](https://github.com/covibes/zeroshot/commit/7b6ae139e97ddcefa46ab3e264e25f6f609163dd))
+
 ## [4.1.4](https://github.com/covibes/zeroshot/compare/v4.1.3...v4.1.4) (2026-01-06)
 
 
