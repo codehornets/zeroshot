@@ -1,3 +1,11 @@
+## [4.1.3](https://github.com/covibes/zeroshot/compare/v4.1.2...v4.1.3) (2026-01-06)
+
+
+### Bug Fixes
+
+* **package:** include scripts/ in npm package files ([4bd5991](https://github.com/covibes/zeroshot/commit/4bd599163df5c7b7f9309f07c4af4b1ec5e7bf38))
+* **preflight:** support macOS Keychain auth detection ([#35](https://github.com/covibes/zeroshot/issues/35)) ([a6f0880](https://github.com/covibes/zeroshot/commit/a6f08807eb2b44b241800a2240a76bf6dbedceca))
+
 ## [4.1.2](https://github.com/covibes/zeroshot/compare/v4.1.1...v4.1.2) (2026-01-05)
 
 
