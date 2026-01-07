@@ -76,15 +76,15 @@ A single agent would say "done!" after the first implementation. Here, the adver
 
 **Zeroshot requires well-defined tasks with clear acceptance criteria.**
 
-| Scenario | Zeroshot? | Why |
-|----------|-----------|-----|
-| "Add rate limiting with sliding window, per-IP, 429 responses" | ✅ Yes | Clear requirements, validators can verify each one |
-| "Refactor auth to use JWT instead of sessions" | ✅ Yes | Known complexity, defined end state |
-| "Fix the bug where users can't login" | ✅ Yes | Known unknown - need to find cause, but success is clear |
-| "Fix all 2410 linting violations" | ✅ Yes | Long-running batch task, clear completion (0 violations) |
-| "Make the app faster" | ❌ No | Unknown unknowns - need exploration first |
-| "Improve the codebase" | ❌ No | No acceptance criteria to validate |
-| "Figure out why tests are flaky" | ❌ No | Exploratory - use single-agent Claude Code |
+| Scenario | ? | Why |
+|----------|:-:|-----|
+| Add rate limiting (sliding window, per-IP, 429) | ✅ | Clear requirements |
+| Refactor auth to JWT | ✅ | Defined end state |
+| Fix login bug | ✅ | Success is measurable |
+| Fix 2410 lint violations | ✅ | Clear completion criteria |
+| Make the app faster | ❌ | Needs exploration first |
+| Improve the codebase | ❌ | No acceptance criteria |
+| Figure out flaky tests | ❌ | Exploratory |
 
 **Known unknowns** (implementation details unclear) → Zeroshot handles this. The planner figures it out.
 
