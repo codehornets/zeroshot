@@ -76,8 +76,8 @@ A single agent would say "done!" after the first implementation. Here, the adver
 
 **Zeroshot requires well-defined tasks with clear acceptance criteria.**
 
-| Scenario | ? | Why |
-|----------|:-:|-----|
+| Scenario | Use? | Why |
+|----------|:----:|-----|
 | Add rate limiting (sliding window, per-IP, 429) | ✅ | Clear requirements |
 | Refactor auth to JWT | ✅ | Defined end state |
 | Fix login bug | ✅ | Success is measurable |
