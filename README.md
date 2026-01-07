@@ -61,7 +61,7 @@ with details of what conflicted. Handle the ABA problem where version goes A->B-
 <p align="center">
   <img src="./docs/assets/zeroshot-demo.gif" alt="Demo" width="700">
   <br>
-  <em>Sped up 100x — 90 minutes, $16, 5 iterations until validators approved</em>
+  <em>Sped up 100x — 90 minutes, 5 iterations until validators approved</em>
 </p>
 
 **The full fix cycle.** Initial implementation passed basic tests but validators caught edge cases: race conditions in concurrent updates, ABA problem not fully handled, retry backoff timing issues. Each rejection triggered fixes until all 48 tests passed with 91%+ coverage.
