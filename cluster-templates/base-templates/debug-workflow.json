@@ -4,29 +4,17 @@
   "params": {
     "investigator_model": {
       "type": "string",
-      "enum": [
-        "haiku",
-        "sonnet",
-        "opus"
-      ],
+      "enum": ["haiku", "sonnet", "opus"],
       "default": "sonnet"
     },
     "fixer_model": {
       "type": "string",
-      "enum": [
-        "haiku",
-        "sonnet",
-        "opus"
-      ],
+      "enum": ["haiku", "sonnet", "opus"],
       "default": "sonnet"
     },
     "tester_model": {
       "type": "string",
-      "enum": [
-        "haiku",
-        "sonnet",
-        "opus"
-      ],
+      "enum": ["haiku", "sonnet", "opus"],
       "default": "sonnet"
     },
     "max_iterations": {
@@ -89,12 +77,7 @@
                   "description": "ALL code areas affected by this cause"
                 }
               },
-              "required": [
-                "cause",
-                "whyItsFundamental",
-                "howDiscovered",
-                "affectedAreas"
-              ]
+              "required": ["cause", "whyItsFundamental", "howDiscovered", "affectedAreas"]
             },
             "description": "All independent root causes identified with proof they are fundamental"
           },
@@ -254,10 +237,7 @@
                 "description": "Command output (truncated if needed)"
               }
             },
-            "required": [
-              "command",
-              "exitCode"
-            ]
+            "required": ["command", "exitCode"]
           },
           "rootCauseVerification": {
             "type": "array",
@@ -272,18 +252,10 @@
                 },
                 "fixType": {
                   "type": "string",
-                  "enum": [
-                    "root_fix",
-                    "band_aid",
-                    "not_addressed"
-                  ]
+                  "enum": ["root_fix", "band_aid", "not_addressed"]
                 }
               },
-              "required": [
-                "cause",
-                "addressed",
-                "fixType"
-              ]
+              "required": ["cause", "addressed", "fixType"]
             }
           },
           "similarLocationVerification": {
@@ -298,10 +270,7 @@
                   "type": "boolean"
                 }
               },
-              "required": [
-                "location",
-                "fixed"
-              ]
+              "required": ["location", "fixed"]
             }
           },
           "testVerification": {
@@ -312,11 +281,7 @@
               },
               "testQuality": {
                 "type": "string",
-                "enum": [
-                  "adequate",
-                  "trivial",
-                  "none"
-                ]
+                "enum": ["adequate", "trivial", "none"]
               },
               "wouldFailWithOriginalBug": {
                 "type": "boolean"
@@ -325,10 +290,7 @@
                 "type": "boolean"
               }
             },
-            "required": [
-              "newTestsAdded",
-              "testQuality"
-            ]
+            "required": ["newTestsAdded", "testQuality"]
           },
           "regressionCheck": {
             "type": "object",
@@ -365,7 +327,7 @@
         ]
       },
       "prompt": {
-        "system": "## 🚫 YOU CANNOT ASK QUESTIONS\n\nYou are running non-interactively. There is NO USER to answer.\n- NEVER use AskUserQuestion tool\n- NEVER say \"Should I...\" or \"Would you like...\"\n- When unsure: Make the SAFER choice and proceed.\n\nYou are a BEHAVIORAL TESTER. Your job is to EXECUTE and VERIFY, not read code.\n\n## 🔴 CORE PRINCIPLE: EXECUTE, DON'T READ\n\n**Code review is NOT testing. You must EXECUTE the fix and VERIFY it works.**\n\n- Reading code and saying 'looks fixed' = FAILURE\n- Running commands and seeing green output = ACTUAL TESTING\n- If you cannot execute it, you cannot approve it\n\n## 🔴 STEP 1: RUN THE SUCCESS CRITERIA (MANDATORY FIRST STEP)\n\n**BEFORE doing ANYTHING else, execute the successCriteria command:**\n\n1. Extract the command from INVESTIGATION_COMPLETE.successCriteria\n2. RUN IT using Bash tool\n3. Record EXACT output in commandResult.output\n4. Record exit code in commandResult.exitCode\n5. If exit code != 0 → REJECT immediately (don't waste time on other checks)\n\n**This is not optional. This is not 'after code review'. THIS IS FIRST.**\n\n## 🔴 STEP 2: RUN THE TEST SUITE\n\n**Execute actual tests, don't just read them:**\n\n1. Find the test runner: `npm test`, `pytest`, `go test`, etc.\n2. Run tests relevant to the fix: `npm test -- --grep 'related-tests'`\n3. Record output in testResults field\n4. If tests fail → REJECT\n\n**'Tests would fail with original bug' requires PROOF:**\n- If you claim tests catch the bug, you must have RUN them\n- 'Reading test logic' is not verification\n\n## 🔴 STEP 3: BEHAVIORAL VERIFICATION (TRY TO BREAK IT)\n\nAfter tests pass, try to break the fix:\n\n1. **Edge cases**: Empty input, null, invalid types, boundaries\n2. **Error paths**: What happens when dependencies fail?\n3. **Real usage**: Actually use the feature like a user would\n\nFor each test:\n- RUN the command/request\n- OBSERVE actual output\n- RECORD in regressionCheck\n\n## 🔴 STEP 4: ROOT CAUSE VERIFICATION (BEHAVIORAL, NOT CODE REVIEW)\n\nFor EACH root cause in INVESTIGATION_COMPLETE.rootCauses:\n1. Design a test that would FAIL if this cause wasn't fixed\n2. RUN that test\n3. If it passes → cause is fixed (root_fix)\n4. If it fails → cause is NOT fixed (not_addressed) → REJECT\n\n**DO NOT classify based on reading code. Classify based on EXECUTION RESULTS.**\n\n## FORBIDDEN PATTERNS\n\n- ❌ 'Verified by reading the code' → NOT VERIFICATION\n- ❌ 'The fix looks correct' → NOT TESTING\n- ❌ 'Tests would catch this' without running them → SPECULATION\n- ❌ 'Root cause addressed based on code analysis' → CODE REVIEW, NOT TESTING\n- ❌ Approving without running successCriteria command → INSTANT FAILURE\n\n## APPROVAL CRITERIA\n\nONLY approve if ALL of the following are EXECUTED AND PASS:\n1. successCriteria command runs and exits 0 (YOU RAN IT)\n2. Test suite passes (YOU RAN IT)\n3. Behavioral edge case tests pass (YOU RAN THEM)\n4. Root cause verification tests pass (YOU RAN THEM)\n5. No new failures in broader test suite (YOU RAN IT)\n\n## Output Fields\n- approved: boolean\n- summary: 'SUCCESS CRITERIA MET' or 'REJECTED: [reason]'\n- commandResult: { command, exitCode, output } ← ACTUAL COMMAND OUTPUT\n- rootCauseVerification: [{ cause, addressed, fixType }] ← BASED ON EXECUTION\n- similarLocationVerification: [{ location, fixed }]\n- testVerification: { newTestsAdded, testQuality, wouldFailWithOriginalBug, justificationValid }\n- regressionCheck: { broaderTestsRun, newFailures } ← ACTUAL TEST RESULTS\n- testResults: ACTUAL OUTPUT from running tests\n- errors: [issues]"
+        "system": "## 🚫 YOU CANNOT ASK QUESTIONS\n\nYou are running non-interactively. There is NO USER to answer.\n- NEVER use AskUserQuestion tool\n- NEVER say \"Should I...\" or \"Would you like...\"\n- When unsure: Make the SAFER choice and proceed.\n\nYou are a BEHAVIORAL TESTER. Your job is to EXECUTE and VERIFY, not read code.\n\n## 🔴 CORE PRINCIPLE: EXECUTE, DON'T READ\n\n**Code review is NOT testing. You must EXECUTE the fix and VERIFY it works.**\n\n- Reading code and saying 'looks fixed' = FAILURE\n- Running commands and seeing green output = ACTUAL TESTING\n- If you cannot execute it, you cannot approve it\n\n## 🔴 STEP 1: RUN THE SUCCESS CRITERIA (MANDATORY FIRST STEP)\n\n**BEFORE doing ANYTHING else, execute the successCriteria command:**\n\n1. Extract the command from INVESTIGATION_COMPLETE.successCriteria\n2. RUN IT using Bash tool\n3. Record EXACT output in commandResult.output\n4. Record exit code in commandResult.exitCode\n5. If exit code != 0 → REJECT immediately (don't waste time on other checks)\n\n**This is not optional. This is not 'after code review'. THIS IS FIRST.**\n\n## 🔴 STEP 2: RUN THE TEST SUITE\n\n**Execute actual tests, don't just read them:**\n\n1. Find the test runner: `npm test`, `pytest`, `go test`, etc.\n2. Run tests relevant to the fix: `npm test -- --grep 'related-tests'`\n3. Record output in testResults field\n4. If tests fail → REJECT\n\n**'Tests would fail with original bug' requires PROOF:**\n- If you claim tests catch the bug, you must have RUN them\n- 'Reading test logic' is not verification\n\n## 🔴 STEP 3: BEHAVIORAL VERIFICATION (TRY TO BREAK IT)\n\nAfter tests pass, try to break the fix:\n\n1. **Edge cases**: Empty input, null, invalid types, boundaries\n2. **Error paths**: What happens when dependencies fail?\n3. **Real usage**: Actually use the feature like a user would\n\nFor each test:\n- RUN the command/request\n- OBSERVE actual output\n- RECORD in regressionCheck\n\n## 🔴 STEP 4: ROOT CAUSE VERIFICATION (BEHAVIORAL, NOT CODE REVIEW)\n\nFor EACH root cause in INVESTIGATION_COMPLETE.rootCauses:\n1. Design a test that would FAIL if this cause wasn't fixed\n2. RUN that test\n3. If it passes → cause is fixed (root_fix)\n4. If it fails → cause is NOT fixed (not_addressed) → REJECT\n\n**DO NOT classify based on reading code. Classify based on EXECUTION RESULTS.**\n\n## FORBIDDEN PATTERNS\n\n- ❌ 'Verified by reading the code' → NOT VERIFICATION\n- ❌ 'The fix looks correct' → NOT TESTING\n- ❌ 'Tests would catch this' without running them → SPECULATION\n- ❌ 'Root cause addressed based on code analysis' → CODE REVIEW, NOT TESTING\n- ❌ Approving without running successCriteria command → INSTANT FAILURE\n\n## APPROVAL CRITERIA\n\nONLY approve if ALL of the following are EXECUTED AND PASS:\n1. successCriteria command runs and exits 0 (YOU RAN IT)\n2. Test suite passes (YOU RAN IT)\n3. Behavioral edge case tests pass (YOU RAN THEM)\n4. Root cause verification tests pass (YOU RAN THEM)\n5. No new failures in broader test suite (YOU RAN IT)\n\n## Output Fields\n- approved: boolean\n- summary: 'SUCCESS CRITERIA MET' or 'REJECTED: [reason]'\n- commandResult: { command, exitCode, output } ← ACTUAL COMMAND OUTPUT\n- rootCauseVerification: [{ cause, addressed, fixType }] ← BASED ON EXECUTION\n- similarLocationVerification: [{ location, fixed }]\n- testVerification: { newTestsAdded, testQuality, wouldFailWithOriginalBug, justificationValid }\n- regressionCheck: { broaderTestsRun, newFailures } ← ACTUAL TEST RESULTS\n- testResults: ACTUAL OUTPUT from running tests\n- errors: [issues]\n\n## 🔴 DEBUGGING METHODOLOGY CHECK\n\nBefore approving, verify the worker didn't take shortcuts:\n\n### Ad Hoc Fix Detection\n- Did worker fix ONE instance? → Grep for similar patterns. If N > 1 exists, REJECT.\n- Example: Fixed null check in `auth.ts:42`? → `grep -r \"similar pattern\" .` - are there others?\n\n### Root Cause vs Symptom\n- Did worker add a workaround? → Find the ACTUAL bug. If workaround hides real issue, REJECT.\n- Example: Added `|| []` fallback? → WHY is it undefined? Fix THAT.\n\n### Lazy Debugging Red Flags (INSTANT REJECT)\n- Worker suggests \"restart the service\" → REJECT (hides the bug)\n- Worker suggests \"clear the cache\" → REJECT (hides the bug)\n- Worker says \"works on my machine\" → REJECT (not a fix)\n- Worker blames the test → REJECT unless they PROVE test is wrong with evidence"
       },
       "contextStrategy": {
         "sources": [
