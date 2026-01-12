@@ -25,6 +25,9 @@ const {
   formatError,
 } = require('../src/preflight');
 
+// Cross-platform helper for checking if command exists
+const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+
 describe('Preflight Validation', function () {
   // Allow slower tests for CLI checks
   this.timeout(10000);
@@ -55,7 +58,7 @@ describe('Preflight Validation', function () {
     it('should detect Claude CLI when installed', function () {
       // Skip if Claude CLI is not installed (CI without Claude)
       try {
-        execSync('which claude', { stdio: 'pipe' });
+        execSync(`${whichCmd} claude`, { stdio: 'pipe' });
       } catch {
         this.skip();
       }
@@ -238,7 +241,7 @@ describe('Preflight Validation', function () {
   describe('checkGhAuth()', () => {
     it('should detect gh CLI when installed', function () {
       try {
-        execSync('which gh', { stdio: 'pipe' });
+        execSync(`${whichCmd} gh`, { stdio: 'pipe' });
       } catch {
         this.skip();
       }
@@ -344,7 +347,7 @@ describe('Preflight Validation', function () {
 
     it('should not require Claude auth when CLI is installed', function () {
       try {
-        execSync('which claude', { stdio: 'pipe' });
+        execSync(`${whichCmd} claude`, { stdio: 'pipe' });
       } catch {
         this.skip();
       }

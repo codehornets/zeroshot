@@ -42,13 +42,15 @@ function formatError(title, detail, recovery) {
 }
 
 /**
- * Check if a command exists
+ * Check if a command exists (cross-platform)
  * @param {string} cmd - Command to check
  * @returns {boolean}
  */
 function commandExists(cmd) {
   try {
-    execSync(`which ${cmd}`, { encoding: 'utf8', stdio: 'pipe' });
+    // Windows uses 'where', Unix uses 'which'
+    const checkCmd = process.platform === 'win32' ? `where ${cmd}` : `which ${cmd}`;
+    execSync(checkCmd, { encoding: 'utf8', stdio: 'pipe' });
     return true;
   } catch {
     return false;
