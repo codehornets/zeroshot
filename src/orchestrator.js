@@ -2453,6 +2453,18 @@ return true;`,
             md += '\n';
           }
         }
+        // Show CANNOT_VALIDATE criteria as warnings
+        const criteriaResults = data.criteriaResults;
+        if (Array.isArray(criteriaResults)) {
+          const cannotValidate = criteriaResults.filter((c) => c.status === 'CANNOT_VALIDATE');
+          if (cannotValidate.length > 0) {
+            md += `**⚠️ Could Not Validate (${cannotValidate.length} criteria):**\n`;
+            for (const cv of cannotValidate) {
+              md += `- ${cv.id}: ${cv.reason || 'No reason provided'}\n`;
+            }
+            md += '\n';
+          }
+        }
       }
     }
 

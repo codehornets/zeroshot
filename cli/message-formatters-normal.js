@@ -115,9 +115,7 @@ function formatIssueOpened(msg, prefix, timestamp, shownNewTaskForCluster, print
  * @returns {boolean} True if message was handled
  */
 function formatImplementationReady(msg, prefix, timestamp, print = console.log) {
-  print(
-    `${prefix} ${chalk.gray(timestamp)} ${chalk.bold.yellow('✅ IMPLEMENTATION READY')}`
-  );
+  print(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.yellow('✅ IMPLEMENTATION READY')}`);
 
   if (msg.content?.data?.commit) {
     print(
@@ -148,10 +146,22 @@ function formatValidationResult(msg, prefix, timestamp, print = console.log) {
     print(`${prefix} ${msg.content.text.substring(0, 100)}`);
   }
 
+  // Show CANNOT_VALIDATE criteria as warnings
+  const criteriaResults = data.criteriaResults;
+  if (Array.isArray(criteriaResults)) {
+    const cannotValidate = criteriaResults.filter((c) => c.status === 'CANNOT_VALIDATE');
+    if (cannotValidate.length > 0) {
+      print(
+        `${prefix} ${chalk.yellow('⚠️ Could not validate')} (${cannotValidate.length} criteria):`
+      );
+      for (const cv of cannotValidate) {
+        print(`${prefix}   ${chalk.yellow('•')} ${cv.id}: ${cv.reason || 'No reason provided'}`);
+      }
+    }
+  }
+
   // Show full JSON data structure
-  print(
-    `${prefix} ${chalk.dim(JSON.stringify(data, null, 2).split('\n').join(`\n${prefix} `))}`
-  );
+  print(`${prefix} ${chalk.dim(JSON.stringify(data, null, 2).split('\n').join(`\n${prefix} `))}`);
 
   return true;
 }

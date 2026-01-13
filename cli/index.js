@@ -473,7 +473,10 @@ program
     'Full automation: worktree isolation + PR + auto-merge (use --docker for Docker)'
   )
   .option('--workers <n>', 'Max sub-agents for worker to spawn in parallel', parseInt)
-  .option('--provider <provider>', 'Override all agents to use a provider (claude, codex, gemini, opencode)')
+  .option(
+    '--provider <provider>',
+    'Override all agents to use a provider (claude, codex, gemini, opencode)'
+  )
   .option('--model <model>', 'Override all agent models (provider-specific model id)')
   .option('-d, --detach', 'Run in background (default: attach to first agent)')
   .option('--mount <spec...>', 'Add Docker mount (host:container[:ro]). Repeatable.')
@@ -3987,6 +3990,21 @@ function renderMessagesToTerminal(clusterId, messages) {
           }
         }
       }
+      // Show CANNOT_VALIDATE criteria as warnings
+      const criteriaResults = data.criteriaResults;
+      if (Array.isArray(criteriaResults)) {
+        const cannotValidate = criteriaResults.filter((c) => c.status === 'CANNOT_VALIDATE');
+        if (cannotValidate.length > 0) {
+          lines.push(
+            `${prefix}   ${chalk.yellow('⚠️ Could not validate')} (${cannotValidate.length} criteria):`
+          );
+          for (const cv of cannotValidate) {
+            lines.push(
+              `${prefix}     ${chalk.yellow('•')} ${cv.id}: ${cv.reason || 'No reason provided'}`
+            );
+          }
+        }
+      }
       continue;
     }
 
@@ -4630,6 +4648,22 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
           safePrint(`${prefix}   - ${issue}`);
         }
       });
+    }
+
+    // Show CANNOT_VALIDATE criteria as warnings
+    const criteriaResults = data.criteriaResults;
+    if (Array.isArray(criteriaResults)) {
+      const cannotValidate = criteriaResults.filter((c) => c.status === 'CANNOT_VALIDATE');
+      if (cannotValidate.length > 0) {
+        safePrint(
+          `${prefix} ${chalk.yellow('⚠️ Could not validate')} (${cannotValidate.length} criteria):`
+        );
+        for (const cv of cannotValidate) {
+          safePrint(
+            `${prefix}   ${chalk.yellow('•')} ${cv.id}: ${cv.reason || 'No reason provided'}`
+          );
+        }
+      }
     }
     return;
   }
