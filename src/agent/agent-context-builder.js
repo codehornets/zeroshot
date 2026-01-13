@@ -129,7 +129,8 @@ function buildContext({
   // Add prompt from config (system prompt, instructions, output format)
   // If selectedPrompt is provided (iteration-based), use it directly
   // Otherwise fall back to legacy config.prompt handling
-  const promptText = selectedPrompt || (typeof config.prompt === 'string' ? config.prompt : config.prompt?.system);
+  const promptText =
+    selectedPrompt || (typeof config.prompt === 'string' ? config.prompt : config.prompt?.system);
 
   if (promptText) {
     context += `## Instructions\n\n${promptText}\n\n`;
@@ -208,6 +209,48 @@ function buildContext({
         }
         context += '\n';
       }
+    }
+  }
+
+  // CANNOT_VALIDATE OPTIMIZATION: For validators, find criteria that were previously
+  // determined unverifiable and tell the validator to skip them (saves API calls)
+  if (role === 'validator') {
+    const prevValidations = messageBus.query({
+      cluster_id: cluster.id,
+      topic: 'VALIDATION_RESULT',
+      since: cluster.createdAt,
+      limit: 50, // Get all validation results from this cluster
+    });
+
+    // Extract all CANNOT_VALIDATE criteria from previous validation results
+    const cannotValidateCriteria = [];
+    for (const msg of prevValidations) {
+      const criteriaResults = msg.content?.data?.criteriaResults;
+      if (Array.isArray(criteriaResults)) {
+        for (const cr of criteriaResults) {
+          if (cr.status === 'CANNOT_VALIDATE' && cr.id) {
+            // Avoid duplicates
+            if (!cannotValidateCriteria.find((c) => c.id === cr.id)) {
+              cannotValidateCriteria.push({
+                id: cr.id,
+                reason: cr.reason || 'No reason provided',
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // Inject skip instructions if there are unverifiable criteria
+    if (cannotValidateCriteria.length > 0) {
+      context += `\n## ⚠️ Previously Unverifiable Criteria (SKIP THESE)\n\n`;
+      context += `The following criteria were determined CANNOT_VALIDATE in previous iterations.\n`;
+      context += `The environmental limitations have not changed. Do NOT re-attempt verification.\n`;
+      context += `Mark these as CANNOT_VALIDATE again with the same reason.\n\n`;
+      for (const cv of cannotValidateCriteria) {
+        context += `- **${cv.id}**: ${cv.reason}\n`;
+      }
+      context += `\n`;
     }
   }
 
