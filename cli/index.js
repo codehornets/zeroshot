@@ -473,7 +473,7 @@ program
     'Full automation: worktree isolation + PR + auto-merge (use --docker for Docker)'
   )
   .option('--workers <n>', 'Max sub-agents for worker to spawn in parallel', parseInt)
-  .option('--provider <provider>', 'Override all agents to use a provider (claude, codex, gemini)')
+  .option('--provider <provider>', 'Override all agents to use a provider (claude, codex, gemini, opencode)')
   .option('--model <model>', 'Override all agent models (provider-specific model id)')
   .option('-d, --detach', 'Run in background (default: attach to first agent)')
   .option('--mount <spec...>', 'Add Docker mount (host:container[:ro]). Repeatable.')
@@ -936,7 +936,7 @@ taskCmd
   .command('run <prompt>')
   .description('Run a single-agent background task')
   .option('-C, --cwd <path>', 'Working directory for task')
-  .option('--provider <provider>', 'Provider to use (claude, codex, gemini)')
+  .option('--provider <provider>', 'Provider to use (claude, codex, gemini, opencode)')
   .option('--model <model>', 'Model id override for the provider')
   .option('--model-level <level>', 'Model level override (level1, level2, level3)')
   .option('--reasoning-effort <effort>', 'Reasoning effort (low, medium, high, xhigh)')
@@ -3097,7 +3097,7 @@ providersCmd.action(async () => {
 
 providersCmd
   .command('set-default <provider>')
-  .description('Set default provider (claude, codex, gemini)')
+  .description('Set default provider (claude, codex, gemini, opencode)')
   .action(async (provider) => {
     await setDefaultCommand([provider]);
   });

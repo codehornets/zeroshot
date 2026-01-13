@@ -362,10 +362,19 @@ function runPreflight(options = {}) {
         ])
       );
     }
+  } else if (providerName === 'opencode') {
+    if (!commandExists('opencode')) {
+      errors.push(
+        formatError('Opencode CLI not available', 'Command "opencode" not installed', [
+          'Install Opencode CLI: see https://opencode.ai',
+          'Then run: opencode --version',
+        ])
+      );
+    }
   } else {
     errors.push(
       formatError('Unknown provider', `Provider "${providerName}" is not supported`, [
-        'Use claude, codex, or gemini',
+        'Use claude, codex, gemini, or opencode',
       ])
     );
   }

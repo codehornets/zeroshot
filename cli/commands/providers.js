@@ -59,7 +59,7 @@ function setDefaultCommand(args) {
 async function setupCommand(args) {
   const provider = normalizeProviderName(args[0]);
   if (!provider) {
-    console.error('Provider is required (claude, codex, gemini)');
+    console.error('Provider is required (claude, codex, gemini, opencode)');
     process.exit(1);
   }
 

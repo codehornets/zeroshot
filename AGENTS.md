@@ -113,7 +113,7 @@ Agent A -> publish() -> SQLite Ledger -> LogicEngine -> trigger match -> Agent B
 - Set `provider` per agent or `defaultProvider`/`forceProvider` at cluster level.
 - Provider names use CLI identifiers: `claude`, `codex`, `gemini` (legacy `anthropic`/`openai`/`google` map to these).
 - `model` remains a provider-specific escape hatch.
-- Codex-only: `reasoningEffort` (`low|medium|high|xhigh`).
+- Codex/Opencode only: `reasoningEffort` (`low|medium|high|xhigh`).
 
 ### Logic Script API
 
@@ -171,7 +171,7 @@ Configurable credential mounts for `--docker` mode. See `lib/docker-config.js`.
 | `dockerEnvPassthrough` | `string[]`    | `[]`     | Extra env vars (supports `VAR`, `VAR_*`, `VAR=value`) |
 | `dockerContainerHome`  | `string`      | `/root`  | Container home for `$HOME` expansion                  |
 
-Mount presets: `gh`, `git`, `ssh`, `aws`, `azure`, `kube`, `terraform`, `gcloud`, `claude`, `codex`, `gemini`.
+Mount presets: `gh`, `git`, `ssh`, `aws`, `azure`, `kube`, `terraform`, `gcloud`, `claude`, `codex`, `gemini`, `opencode`.
 
 Provider CLIs in Docker require credential mounts; Zeroshot warns when missing.
 

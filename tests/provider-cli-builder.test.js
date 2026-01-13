@@ -128,6 +128,48 @@ describe('Provider CLI Builders', function () {
   });
 
   // ============================================================================
+  // OPENCODE PROVIDER
+  // ============================================================================
+  describe('Opencode CLI Builder', function () {
+    const { buildCommand } = require('../src/providers/opencode/cli-builder');
+
+    it('should inject schema into context when jsonSchema provided', function () {
+      const schema = { type: 'object', properties: { result: { type: 'string' } } };
+      const result = buildCommand('test prompt', {
+        jsonSchema: schema,
+        cliFeatures: { supportsJson: true },
+      });
+
+      const finalContext = result.args[result.args.length - 1];
+      assert.ok(finalContext.includes('## OUTPUT FORMAT (CRITICAL - REQUIRED)'));
+      assert.ok(finalContext.includes('You MUST respond with a JSON object'));
+      assert.ok(finalContext.includes('"result"'));
+    });
+
+    it('should include --format json when outputFormat is json or stream-json', function () {
+      const result = buildCommand('test', {
+        outputFormat: 'json',
+        cliFeatures: { supportsJson: true },
+      });
+
+      assert.ok(result.args.includes('--format'));
+      assert.ok(result.args.includes('json'));
+    });
+
+    it('should include model and variant when provided', function () {
+      const result = buildCommand('test', {
+        modelSpec: { model: 'opencode/glm-4.7-free', reasoningEffort: 'high' },
+        cliFeatures: { supportsJson: true, supportsVariant: true },
+      });
+
+      assert.ok(result.args.includes('--model'));
+      assert.ok(result.args.includes('opencode/glm-4.7-free'));
+      assert.ok(result.args.includes('--variant'));
+      assert.ok(result.args.includes('high'));
+    });
+  });
+
+  // ============================================================================
   // CLAUDE PROVIDER
   // ============================================================================
   describe('Claude CLI Builder', function () {

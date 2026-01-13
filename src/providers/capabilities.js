@@ -28,6 +28,15 @@ const CAPABILITIES = {
     thinkingMode: true,
     reasoningEffort: false,
   },
+  opencode: {
+    dockerIsolation: true,
+    worktreeIsolation: true,
+    mcpServers: true,
+    jsonSchema: 'experimental',
+    streamJson: true,
+    thinkingMode: true,
+    reasoningEffort: true,
+  },
 };
 
 function checkCapability(provider, capability) {

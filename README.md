@@ -83,18 +83,20 @@ and surface conflicts with details. Handle the ABA problem where version goes A-
 npm install -g @covibes/zeroshot
 ```
 
-**Requires**: Node 18+, at least one provider CLI (Claude Code, Codex, Gemini). [GitHub CLI](https://cli.github.com/) is required when running by issue number.
+**Requires**: Node 18+, at least one provider CLI (Claude Code, Codex, Gemini, Opencode). [GitHub CLI](https://cli.github.com/) is required when running by issue number.
 
 ```bash
 # Install one or more providers
 npm i -g @anthropic-ai/claude-code
 npm i -g @openai/codex
 npm i -g @google/gemini-cli
+# Opencode: see https://opencode.ai
 
 # Authenticate with the provider CLI
 claude login        # Claude
 codex login         # Codex
 gemini auth login   # Gemini
+opencode auth login # Opencode
 
 # GitHub auth (for issue numbers)
 gh auth login
