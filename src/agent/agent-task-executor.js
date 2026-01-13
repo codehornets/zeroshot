@@ -455,6 +455,9 @@ async function spawnClaudeTask(agent, context) {
     }
   }
 
+  // Timeout for spawn phase - if CLI hangs during init (e.g., opencode 429 bug), kill it
+  const SPAWN_TIMEOUT_MS = 30000; // 30 seconds to spawn task
+
   const taskId = await new Promise((resolve, reject) => {
     const proc = spawn(ctPath, args, {
       cwd,
@@ -467,6 +470,20 @@ async function spawnClaudeTask(agent, context) {
 
     let stdout = '';
     let stderr = '';
+    let resolved = false;
+
+    // CRITICAL: Timeout to prevent infinite hang if provider CLI hangs
+    const spawnTimeout = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      proc.kill('SIGKILL');
+      reject(
+        new Error(
+          `Spawn timeout after ${SPAWN_TIMEOUT_MS / 1000}s - provider CLI hung. ` +
+            `stdout: ${stdout.slice(-500)}, stderr: ${stderr.slice(-500)}`
+        )
+      );
+    }, SPAWN_TIMEOUT_MS);
 
     proc.stdout.on('data', (data) => {
       stdout += data.toString();
@@ -477,6 +494,9 @@ async function spawnClaudeTask(agent, context) {
     });
 
     proc.on('close', (code, signal) => {
+      clearTimeout(spawnTimeout);
+      if (resolved) return;
+      resolved = true;
       // Handle process killed by signal (e.g., SIGTERM, SIGKILL, SIGSTOP)
       if (signal) {
         reject(new Error(`Process killed by signal ${signal}${stderr ? `: ${stderr}` : ''}`));
@@ -511,6 +531,9 @@ async function spawnClaudeTask(agent, context) {
     });
 
     proc.on('error', (error) => {
+      clearTimeout(spawnTimeout);
+      if (resolved) return;
+      resolved = true;
       reject(error);
     });
   });
@@ -965,6 +988,9 @@ async function spawnClaudeTaskIsolated(agent, context) {
   command.push(finalContext);
 
   // STEP 1: Spawn task and extract task ID (same as non-isolated mode)
+  // Timeout for spawn phase - if CLI hangs during init (e.g., opencode 429 bug), kill it
+  const SPAWN_TIMEOUT_MS = 30000; // 30 seconds to spawn task
+
   const taskId = await new Promise((resolve, reject) => {
     const proc = manager.spawnInContainer(clusterId, command, {
       env:
@@ -983,6 +1009,20 @@ async function spawnClaudeTaskIsolated(agent, context) {
 
     let stdout = '';
     let stderr = '';
+    let resolved = false;
+
+    // CRITICAL: Timeout to prevent infinite hang if provider CLI hangs
+    const spawnTimeout = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      proc.kill('SIGKILL');
+      reject(
+        new Error(
+          `Spawn timeout after ${SPAWN_TIMEOUT_MS / 1000}s - provider CLI hung. ` +
+            `stdout: ${stdout.slice(-500)}, stderr: ${stderr.slice(-500)}`
+        )
+      );
+    }, SPAWN_TIMEOUT_MS);
 
     proc.stdout.on('data', (data) => {
       stdout += data.toString();
@@ -993,6 +1033,9 @@ async function spawnClaudeTaskIsolated(agent, context) {
     });
 
     proc.on('close', (code, signal) => {
+      clearTimeout(spawnTimeout);
+      if (resolved) return;
+      resolved = true;
       // Handle process killed by signal
       if (signal) {
         reject(new Error(`Process killed by signal ${signal}${stderr ? `: ${stderr}` : ''}`));
@@ -1026,6 +1069,9 @@ async function spawnClaudeTaskIsolated(agent, context) {
     });
 
     proc.on('error', (error) => {
+      clearTimeout(spawnTimeout);
+      if (resolved) return;
+      resolved = true;
       reject(error);
     });
   });
