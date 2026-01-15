@@ -11,9 +11,9 @@ const path = require('path');
 const os = require('os');
 const GitHub = require('../../src/github');
 
-describe('GitHub.createFileInput()', function () {
-  let tempDir;
+let tempDir;
 
+describe('GitHub.createFileInput()', function () {
   beforeEach(function () {
     // Create temp directory for test files
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-test-'));
@@ -26,6 +26,14 @@ describe('GitHub.createFileInput()', function () {
     }
   });
 
+  registerFileReadingTests();
+  registerTitleExtractionTests();
+  registerOutputStructureTests();
+  registerMarkdownFormattingTests();
+  registerEdgeCaseTests();
+});
+
+function registerFileReadingTests() {
   describe('File reading', function () {
     it('should read file content correctly', function () {
       const filePath = path.join(tempDir, 'test.md');
@@ -77,7 +85,9 @@ describe('GitHub.createFileInput()', function () {
       assert.strictEqual(result.body, content);
     });
   });
+}
 
+function registerTitleExtractionTests() {
   describe('Title extraction', function () {
     it('should extract title from first # header', function () {
       const filePath = path.join(tempDir, 'test.md');
@@ -129,7 +139,9 @@ describe('GitHub.createFileInput()', function () {
       assert.strictEqual(result.title, 'Main Title');
     });
   });
+}
 
+function registerOutputStructureTests() {
   describe('Output structure', function () {
     it('should match _parseIssue format', function () {
       const filePath = path.join(tempDir, 'test.md');
@@ -160,7 +172,9 @@ describe('GitHub.createFileInput()', function () {
       assert.ok(result.context.includes('Add dark mode.'));
     });
   });
+}
 
+function registerMarkdownFormattingTests() {
   describe('Markdown formatting preservation', function () {
     it('should preserve headers', function () {
       const filePath = path.join(tempDir, 'test.md');
@@ -204,7 +218,9 @@ describe('GitHub.createFileInput()', function () {
       assert.ok(result.body.includes('`npm install`'));
     });
   });
+}
 
+function registerEdgeCaseTests() {
   describe('Edge cases', function () {
     it('should handle empty file', function () {
       const filePath = path.join(tempDir, 'empty.md');
@@ -257,4 +273,4 @@ describe('GitHub.createFileInput()', function () {
       assert.strictEqual(result.title, 'whitespace');
     });
   });
-});
+}
