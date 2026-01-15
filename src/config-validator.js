@@ -521,6 +521,114 @@ function analyzeMessageFlow(config) {
 /**
  * Phase 3: Validate agent-specific configurations
  */
+function recordAgentRole(roles, agent) {
+  if (!roles.has(agent.role)) {
+    roles.set(agent.role, []);
+  }
+  roles.get(agent.role).push(agent.id);
+}
+
+function agentExecutesTask(agent) {
+  return agent.triggers?.some((t) => t.action === 'execute_task' || (!t.action && !t.logic));
+}
+
+function validateOrchestratorTriggers(agent, warnings) {
+  if (agent.role !== 'orchestrator') {
+    return;
+  }
+
+  if (agentExecutesTask(agent)) {
+    warnings.push(
+      `Orchestrator '${agent.id}' has execute_task triggers. ` +
+        'Orchestrators typically use action: "stop_cluster". This may waste API calls.'
+    );
+  }
+}
+
+function validateValidatorGitUsage(agent, errors) {
+  if (agent.role !== 'validator') {
+    return;
+  }
+
+  const prompt = typeof agent.prompt === 'string' ? agent.prompt : agent.prompt?.system;
+  const gitPatterns = ['git diff', 'git status', 'git log', 'git show'];
+  for (const pattern of gitPatterns) {
+    if (prompt?.includes(pattern)) {
+      errors.push(`Validator '${agent.id}' uses '${pattern}' - git state is unreliable in agents`);
+    }
+  }
+}
+
+function validateJsonOutputSchema(agent, warnings) {
+  if (agent.outputFormat === 'json' && !agent.jsonSchema) {
+    warnings.push(
+      `Agent '${agent.id}' has outputFormat: 'json' but no jsonSchema. ` +
+        'Output parsing may be unreliable.'
+    );
+  }
+}
+
+function validateMaxIterations(agent, warnings) {
+  if (agent.maxIterations && agent.maxIterations > 50) {
+    warnings.push(
+      `Agent '${agent.id}' has maxIterations: ${agent.maxIterations}. ` +
+        'This may consume significant API credits if stuck in a loop.'
+    );
+  }
+}
+
+function validateImplementationIterations(agent, warnings) {
+  if (agent.role === 'implementation' && !agent.maxIterations) {
+    warnings.push(
+      `Implementation agent '${agent.id}' has no maxIterations. ` +
+        'Defaults to 30, but consider setting explicitly.'
+    );
+  }
+}
+
+function validateModelSpec(agent, errors) {
+  if (agent.model) {
+    errors.push(
+      `Agent '${agent.id}' uses 'model: "${agent.model}"'. ` +
+        `Use 'modelLevel: "level1|level2|level3"' instead for provider-agnostic model selection.`
+    );
+  }
+}
+
+function findRoleReferences(script) {
+  const matches = script.match(/getAgentsByRole\(['"](\w+)['"]\)/g);
+  if (!matches) {
+    return [];
+  }
+
+  return matches.map((match) => match.match(/['"](\w+)['"]/)[1]);
+}
+
+function warnMissingRoleReferences(agents, roles, warnings) {
+  for (const agent of agents) {
+    for (const trigger of agent.triggers || []) {
+      if (!trigger.logic?.script) {
+        continue;
+      }
+
+      const script = trigger.logic.script;
+      const rolesReferenced = findRoleReferences(script);
+      if (rolesReferenced.length === 0) {
+        continue;
+      }
+
+      for (const role of rolesReferenced) {
+        if (!roles.has(role)) {
+          warnings.push(
+            `Agent '${agent.id}' logic references role '${role}' but no agent has that role. ` +
+              `Trigger may be a no-op. Available roles: [${Array.from(roles.keys()).join(', ')}]`
+          );
+        }
+      }
+    }
+  }
+}
+
 function validateAgents(config) {
   const errors = [];
   const warnings = [];
@@ -528,95 +636,20 @@ function validateAgents(config) {
   const roles = new Map(); // role -> [agentIds]
 
   for (const agent of config.agents) {
-    // Track roles
-    if (!roles.has(agent.role)) {
-      roles.set(agent.role, []);
-    }
-    roles.get(agent.role).push(agent.id);
-
-    // Orchestrator should not execute tasks
-    if (agent.role === 'orchestrator') {
-      const executesTask = agent.triggers?.some(
-        (t) => t.action === 'execute_task' || (!t.action && !t.logic)
-      );
-      if (executesTask) {
-        warnings.push(
-          `Orchestrator '${agent.id}' has execute_task triggers. ` +
-            'Orchestrators typically use action: "stop_cluster". This may waste API calls.'
-        );
-      }
-    }
-
-    // Check for git operations in validator prompts (unreliable in agents)
-    if (agent.role === 'validator') {
-      const prompt = typeof agent.prompt === 'string' ? agent.prompt : agent.prompt?.system;
-      const gitPatterns = ['git diff', 'git status', 'git log', 'git show'];
-      for (const pattern of gitPatterns) {
-        if (prompt?.includes(pattern)) {
-          errors.push(
-            `Validator '${agent.id}' uses '${pattern}' - git state is unreliable in agents`
-          );
-        }
-      }
-    }
-
-    // JSON output without schema
-    if (agent.outputFormat === 'json' && !agent.jsonSchema) {
-      warnings.push(
-        `Agent '${agent.id}' has outputFormat: 'json' but no jsonSchema. ` +
-          'Output parsing may be unreliable.'
-      );
-    }
-
-    // Very high maxIterations
-    if (agent.maxIterations && agent.maxIterations > 50) {
-      warnings.push(
-        `Agent '${agent.id}' has maxIterations: ${agent.maxIterations}. ` +
-          'This may consume significant API credits if stuck in a loop.'
-      );
-    }
-
-    // No maxIterations on implementation agent (unbounded retries)
-    if (agent.role === 'implementation' && !agent.maxIterations) {
-      warnings.push(
-        `Implementation agent '${agent.id}' has no maxIterations. ` +
-          'Defaults to 30, but consider setting explicitly.'
-      );
-    }
-
-    // FORBIDDEN: Direct model specification in configs
-    // Use modelLevel (level1/level2/level3) for provider-agnostic model selection
-    if (agent.model) {
-      errors.push(
-        `Agent '${agent.id}' uses 'model: "${agent.model}"'. ` +
-          `Use 'modelLevel: "level1|level2|level3"' instead for provider-agnostic model selection.`
-      );
-    }
+    recordAgentRole(roles, agent);
+    validateOrchestratorTriggers(agent, warnings);
+    validateValidatorGitUsage(agent, errors);
+    validateJsonOutputSchema(agent, warnings);
+    validateMaxIterations(agent, warnings);
+    validateImplementationIterations(agent, warnings);
+    validateModelSpec(agent, errors);
   }
 
   // Check for role references in logic scripts
   // IMPORTANT: Changed from error to warning because some triggers are designed to be
   // no-ops when the referenced role doesn't exist (e.g., worker's VALIDATION_RESULT
   // trigger returns false when validators.length === 0)
-  for (const agent of config.agents) {
-    for (const trigger of agent.triggers || []) {
-      if (trigger.logic?.script) {
-        const script = trigger.logic.script;
-        const roleMatch = script.match(/getAgentsByRole\(['"](\w+)['"]\)/g);
-        if (roleMatch) {
-          for (const match of roleMatch) {
-            const role = match.match(/['"](\w+)['"]/)[1];
-            if (!roles.has(role)) {
-              warnings.push(
-                `Agent '${agent.id}' logic references role '${role}' but no agent has that role. ` +
-                  `Trigger may be a no-op. Available roles: [${Array.from(roles.keys()).join(', ')}]`
-              );
-            }
-          }
-        }
-      }
-    }
-  }
+  warnMissingRoleReferences(config.agents, roles, warnings);
 
   return { errors, warnings };
 }
