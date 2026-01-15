@@ -42,6 +42,22 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForClusterState(orchestratorInstance, clusterId, targetState, timeoutMs = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const status = orchestratorInstance.getStatus(clusterId);
+      if (status.state === targetState) {
+        return;
+      }
+    } catch {
+      // Cluster may be removed during shutdown
+    }
+    await sleep(50);
+  }
+  throw new Error(`Cluster ${clusterId} did not reach ${targetState} within ${timeoutMs}ms`);
+}
+
 // Load fixture config from tests/fixtures/
 function loadFixture(filename) {
   const fixturePath = path.join(__dirname, 'fixtures', filename);
@@ -176,6 +192,46 @@ describe('Orchestrator - Cluster Lifecycle (CRITICAL)', function () {
       // Verify: ISSUE_OPENED published
       const ledger = new LedgerAssertions(cluster.ledger, clusterId);
       ledger.assertPublished('ISSUE_OPENED');
+    });
+
+    it('should retry once on SIGTERM termination even with maxRetries=1', async function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            modelLevel: 'level2',
+            outputFormat: 'text',
+            maxRetries: 1,
+            triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: {
+                  topic: 'CLUSTER_COMPLETE',
+                  content: {
+                    data: { reason: 'sigterm-retry-test' },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      };
+
+      let callCount = 0;
+      mockRunner.when('worker').calls(() => {
+        callCount += 1;
+        if (callCount === 1) {
+          return { success: false, output: '', error: 'Killed by SIGTERM' };
+        }
+        return { success: true, output: 'ok' };
+      });
+
+      const result = await orchestrator.start(config, { text: 'Fix bug' });
+      await waitForClusterState(orchestrator, result.id, 'stopped', 10000);
+
+      assert.strictEqual(callCount, 2, 'Expected SIGTERM failure to trigger one retry');
     });
 
     it('should inject worktree cwd when worktree enabled', function () {
