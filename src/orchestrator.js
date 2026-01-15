@@ -1791,7 +1791,63 @@ Continue from where you left off. Review your previous output to understand what
     this._log(`[Orchestrator] Validating ${operations.length} operation(s) from ${sender}`);
 
     // Phase 1: Pre-validate operation structure
+    const validationErrors = this._validateOperationChain(operations);
+
+    if (validationErrors.length > 0) {
+      const errorMsg = `Operation chain validation failed:\n  - ${validationErrors.join('\n  - ')}`;
+      this._log(`[Orchestrator] ❌ ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
+
+    // Phase 2: Build mock cluster config with proposed agents
+    // Collect all agents that would exist after operations complete
+    const existingAgentConfigs = cluster.config.agents || [];
+    const proposedAgentConfigs = this._buildProposedAgentConfigs(existingAgentConfigs, operations);
+
+    // Phase 3: Validate proposed cluster config
+    const validation = this._validateProposedConfig(
+      clusterId,
+      cluster,
+      proposedAgentConfigs,
+      operations
+    );
+
+    // Log warnings but proceed
+    if (validation.warnings.length > 0) {
+      this._log(`[Orchestrator] ⚠️ Warnings (proceeding anyway):`);
+      for (const warning of validation.warnings) {
+        this._log(`    - ${warning}`);
+      }
+    }
+
+    // Phase 4: Execute validated operations
+    this._log(`[Orchestrator] ✓ Validation passed, executing ${operations.length} operation(s)`);
+
+    await this._executeOperations(cluster, operations, sender, context);
+
+    this._log(`[Orchestrator] All ${operations.length} operation(s) executed successfully`);
+
+    // Publish success notification
+    cluster.messageBus.publish({
+      cluster_id: clusterId,
+      topic: 'CLUSTER_OPERATIONS_SUCCESS',
+      sender: 'orchestrator',
+      content: {
+        text: `Executed ${operations.length} operation(s)`,
+        data: {
+          operationCount: operations.length,
+          agentCount: cluster.agents.length,
+        },
+      },
+    });
+
+    // Save updated cluster state to disk
+    await this._saveClusters();
+  }
+
+  _validateOperationChain(operations) {
     const validationErrors = [];
+
     for (let i = 0; i < operations.length; i++) {
       const op = operations[i];
       if (!op.action) {
@@ -1805,21 +1861,15 @@ Continue from where you left off. Review your previous output to understand what
       }
     }
 
-    if (validationErrors.length > 0) {
-      const errorMsg = `Operation chain validation failed:\n  - ${validationErrors.join('\n  - ')}`;
-      this._log(`[Orchestrator] ❌ ${errorMsg}`);
-      throw new Error(errorMsg);
-    }
+    return validationErrors;
+  }
 
-    // Phase 2: Build mock cluster config with proposed agents
-    // Collect all agents that would exist after operations complete
-    const existingAgentConfigs = cluster.config.agents || [];
+  _buildProposedAgentConfigs(existingAgentConfigs, operations) {
     const proposedAgentConfigs = [...existingAgentConfigs];
 
     for (const op of operations) {
       if (op.action === 'add_agents' && op.agents) {
         for (const agentConfig of op.agents) {
-          // Check for duplicate before adding
           const existingIdx = proposedAgentConfigs.findIndex((a) => a.id === agentConfig.id);
           if (existingIdx === -1) {
             proposedAgentConfigs.push(agentConfig);
@@ -1840,7 +1890,10 @@ Continue from where you left off. Review your previous output to understand what
       }
     }
 
-    // Phase 3: Validate proposed cluster config
+    return proposedAgentConfigs;
+  }
+
+  _validateProposedConfig(clusterId, cluster, proposedAgentConfigs, operations) {
     const mockConfig = { agents: proposedAgentConfigs };
     const validation = configValidator.validateConfig(mockConfig);
 
@@ -1866,62 +1919,35 @@ Continue from where you left off. Review your previous output to understand what
       throw new Error(errorMsg);
     }
 
-    // Log warnings but proceed
-    if (validation.warnings.length > 0) {
-      this._log(`[Orchestrator] ⚠️ Warnings (proceeding anyway):`);
-      for (const warning of validation.warnings) {
-        this._log(`    - ${warning}`);
-      }
-    }
+    return validation;
+  }
 
-    // Phase 4: Execute validated operations
-    this._log(`[Orchestrator] ✓ Validation passed, executing ${operations.length} operation(s)`);
-
+  async _executeOperations(cluster, operations, sender, context) {
     for (let i = 0; i < operations.length; i++) {
       const op = operations[i];
       this._log(`  [${i + 1}/${operations.length}] ${op.action}`);
-
-      switch (op.action) {
-        case 'add_agents':
-          await this._opAddAgents(cluster, op, context);
-          break;
-
-        case 'remove_agents':
-          await this._opRemoveAgents(cluster, op);
-          break;
-
-        case 'update_agent':
-          this._opUpdateAgent(cluster, op);
-          break;
-
-        case 'publish':
-          this._opPublish(cluster, op, sender);
-          break;
-
-        case 'load_config':
-          await this._opLoadConfig(cluster, op, context);
-          break;
-      }
+      await this._executeOperation(cluster, op, sender, context);
     }
+  }
 
-    this._log(`[Orchestrator] All ${operations.length} operation(s) executed successfully`);
-
-    // Publish success notification
-    cluster.messageBus.publish({
-      cluster_id: clusterId,
-      topic: 'CLUSTER_OPERATIONS_SUCCESS',
-      sender: 'orchestrator',
-      content: {
-        text: `Executed ${operations.length} operation(s)`,
-        data: {
-          operationCount: operations.length,
-          agentCount: cluster.agents.length,
-        },
-      },
-    });
-
-    // Save updated cluster state to disk
-    await this._saveClusters();
+  async _executeOperation(cluster, op, sender, context) {
+    switch (op.action) {
+      case 'add_agents':
+        await this._opAddAgents(cluster, op, context);
+        break;
+      case 'remove_agents':
+        await this._opRemoveAgents(cluster, op);
+        break;
+      case 'update_agent':
+        this._opUpdateAgent(cluster, op);
+        break;
+      case 'publish':
+        this._opPublish(cluster, op, sender);
+        break;
+      case 'load_config':
+        await this._opLoadConfig(cluster, op, context);
+        break;
+    }
   }
 
   /**
