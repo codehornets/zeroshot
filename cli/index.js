@@ -1622,6 +1622,229 @@ async function connectAttachClient({ AttachClient, socketPath, id, agentName }) 
   await client.connect();
 }
 
+function getFinishCluster(orchestrator, id) {
+  const cluster = orchestrator.getCluster(id);
+  if (!cluster) {
+    console.error(chalk.red(`Error: Cluster ${id} not found`));
+    console.error(chalk.dim('Use "zeroshot list" to see available clusters'));
+    process.exit(1);
+  }
+  return cluster;
+}
+
+async function promptStopCluster(id) {
+  console.log(chalk.yellow(`Cluster ${id} is still running.`));
+  console.log(chalk.dim('Stopping it before converting to completion task...'));
+  console.log('');
+
+  const readline = require('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const answer = await new Promise((resolve) => {
+    rl.question(chalk.yellow('Continue? (y/N) '), resolve);
+  });
+  rl.close();
+
+  return answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes';
+}
+
+async function stopClusterIfRunning(cluster, id, options, orchestrator) {
+  if (cluster.state !== 'running') {
+    return;
+  }
+
+  if (!options.y && !options.yes) {
+    const shouldContinue = await promptStopCluster(id);
+    if (!shouldContinue) {
+      console.log(chalk.red('Aborted'));
+      process.exit(0);
+    }
+  }
+
+  console.log(chalk.cyan('Stopping cluster...'));
+  await orchestrator.stop(id);
+  console.log(chalk.green('✓ Cluster stopped'));
+  console.log('');
+}
+
+function extractFinishContext(messages) {
+  const issueOpened = messages.find((m) => m.topic === 'ISSUE_OPENED');
+  const taskText = issueOpened?.content?.text || 'Unknown task';
+  const issueNumber = issueOpened?.content?.data?.issue_number;
+  const issueTitle = issueOpened?.content?.data?.title || 'Implementation';
+  const agentOutputs = messages.filter((m) => m.topic === 'AGENT_OUTPUT');
+  const validations = messages.filter((m) => m.topic === 'VALIDATION_RESULT');
+  const approvedValidations = validations.filter(
+    (validation) =>
+      validation.content?.data?.approved === true || validation.content?.data?.approved === 'true'
+  );
+  return {
+    taskText,
+    issueNumber,
+    issueTitle,
+    agentOutputs,
+    validations,
+    approvedValidations,
+  };
+}
+
+function buildContextSummary({
+  taskText,
+  issueNumber,
+  issueTitle,
+  agentOutputs,
+  validations,
+  approvedValidations,
+}) {
+  let contextSummary = `# Original Task\n\n${taskText}\n\n`;
+
+  if (issueNumber) {
+    contextSummary += `Issue: #${issueNumber} - ${issueTitle}\n\n`;
+  }
+
+  contextSummary += `# Progress So Far\n\n`;
+  contextSummary += `- ${agentOutputs.length} agent outputs\n`;
+  contextSummary += `- ${validations.length} validation results\n`;
+  contextSummary += `- ${approvedValidations.length} approvals\n\n`;
+
+  if (validations.length > 0) {
+    contextSummary += `## Recent Validations\n\n`;
+    for (const validation of validations.slice(-3)) {
+      const approved =
+        validation.content?.data?.approved === true ||
+        validation.content?.data?.approved === 'true';
+      const icon = approved ? '✅' : '❌';
+      contextSummary += `${icon} **${validation.sender}**: ${validation.content?.data?.summary || 'No summary'}\n`;
+    }
+    contextSummary += '\n';
+  }
+
+  return contextSummary;
+}
+
+function buildCompletionPrompt({ contextSummary, taskText, issueNumber, issueTitle }) {
+  const mergeGoal = 'CREATE PR AND MERGE IT';
+  const mergeStep = `
+8. MERGE THE PR - THIS IS MANDATORY:
+   \`\`\`bash
+   gh pr merge --merge --auto
+   \`\`\`
+
+   IF MERGE FAILS DUE TO CONFLICTS:
+   a) Pull and rebase: \`git fetch origin main && git rebase origin/main\`
+   b) Resolve conflicts manually (read files, make decisions, edit)
+   c) \`git add <resolved-files> && git rebase --continue\`
+   d) Force push: \`git push --force-with-lease\`
+   e) Retry merge: \`gh pr merge --merge\`
+
+   REPEAT UNTIL MERGED. DO NOT GIVE UP.`;
+
+  return `# YOUR MISSION: ${mergeGoal}
+
+${contextSummary}
+
+# WHAT YOU MUST DO NOW
+
+You are the FINISHER. Your ONLY job is to take this cluster's work and push it across the finish line.
+
+**FAILURE IS NOT AN OPTION. YOU MUST COMPLETE THIS TASK.**
+
+## Steps (MUST complete ALL):
+
+1. REVIEW CURRENT STATE - Check git status, see what's changed:
+   \`\`\`bash
+   git status
+   git diff
+   \`\`\`
+
+2. COMMIT ALL CHANGES - Stage and commit everything:
+   \`\`\`bash
+   git add .
+   git commit -m "${issueTitle || 'feat: implement task'}"
+   \`\`\`
+
+3. CREATE BRANCH - Use issue number if available:
+   \`\`\`bash
+   ${issueNumber ? `git checkout -b issue-${issueNumber}` : 'git checkout -b feature/implementation'}
+   \`\`\`
+
+4. PUSH TO REMOTE:
+   \`\`\`bash
+   git push -u origin HEAD
+   \`\`\`
+
+5. CREATE PULL REQUEST:
+   \`\`\`bash
+   gh pr create --title "${issueTitle || 'Implementation'}" --body "Closes #${issueNumber || 'N/A'}
+
+## Summary
+${taskText.slice(0, 200)}...
+
+## Changes
+- Implementation complete
+- All validations addressed
+
+🤖 Generated with zeroshot finish"
+   \`\`\`
+
+6. GET PR URL:
+   \`\`\`bash
+   gh pr view --json url -q .url
+   \`\`\`
+
+7. OUTPUT THE PR URL - Print it clearly so user can see it
+${mergeStep}
+
+## RULES
+
+- NO EXCUSES: If something fails, FIX IT and retry
+- NO SHORTCUTS: Follow ALL steps above
+- NO PARTIAL WORK: Must reach PR creation and merge
+- IF TESTS FAIL: Fix them until they pass
+- IF CI FAILS: Wait for it, fix issues, retry
+- IF CONFLICTS: Resolve them intelligently
+
+**DO NOT STOP UNTIL YOU HAVE A MERGED PR.**`;
+}
+
+function printCompletionPromptPreview(completionPrompt) {
+  console.log(chalk.dim('='.repeat(80)));
+  console.log(chalk.dim('Task prompt preview:'));
+  console.log(chalk.dim('='.repeat(80)));
+  console.log(completionPrompt.split('\n').slice(0, 20).join('\n'));
+  console.log(chalk.dim('... (truncated) ...\n'));
+  console.log(chalk.dim('='.repeat(80)));
+  console.log('');
+}
+
+function buildFinishTaskOptions(cluster) {
+  const taskOptions = {
+    cwd: process.cwd(),
+  };
+
+  if (cluster.isolation?.enabled && cluster.isolation?.containerId) {
+    console.log(chalk.dim(`Using isolation container: ${cluster.isolation.containerId}`));
+    taskOptions.isolation = {
+      containerId: cluster.isolation.containerId,
+      workDir: '/workspace',
+    };
+  }
+
+  return taskOptions;
+}
+
+function printFinishTaskStarted(cluster) {
+  console.log('');
+  console.log(chalk.green(`✓ Completion task started`));
+  if (cluster.isolation?.enabled) {
+    console.log(chalk.dim('Running in isolation container (same as cluster)'));
+  }
+  console.log(chalk.dim('Monitor with: zeroshot list'));
+}
+
 // Lazy-loaded orchestrator (quiet by default) - created on first use
 /** @type {import('../src/orchestrator') | null} */
 let _orchestrator = null;
@@ -2726,208 +2949,29 @@ program
       const OrchestratorModule = require('../src/orchestrator');
       const orchestrator = new OrchestratorModule();
 
-      // Check if cluster exists
-      const cluster = orchestrator.getCluster(id);
-
-      if (!cluster) {
-        console.error(chalk.red(`Error: Cluster ${id} not found`));
-        console.error(chalk.dim('Use "zeroshot list" to see available clusters'));
-        process.exit(1);
-      }
-
-      // Stop cluster if it's running (with confirmation unless -y)
-      if (cluster.state === 'running') {
-        if (!options.y && !options.yes) {
-          console.log(chalk.yellow(`Cluster ${id} is still running.`));
-          console.log(chalk.dim('Stopping it before converting to completion task...'));
-          console.log('');
-
-          // Simple confirmation prompt
-          const readline = require('readline');
-          const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-          });
-
-          const answer = await new Promise((resolve) => {
-            rl.question(chalk.yellow('Continue? (y/N) '), resolve);
-          });
-          rl.close();
-
-          if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
-            console.log(chalk.red('Aborted'));
-            process.exit(0);
-          }
-        }
-
-        console.log(chalk.cyan('Stopping cluster...'));
-        await orchestrator.stop(id);
-        console.log(chalk.green('✓ Cluster stopped'));
-        console.log('');
-      }
+      const cluster = getFinishCluster(orchestrator, id);
+      await stopClusterIfRunning(cluster, id, options, orchestrator);
 
       console.log(chalk.cyan(`Converting cluster ${id} to completion task...`));
       console.log('');
 
-      // Extract cluster context from ledger
       const messages = cluster.messageBus.getAll(id);
-
-      // Find original task
-      const issueOpened = messages.find((m) => m.topic === 'ISSUE_OPENED');
-      const taskText = issueOpened?.content?.text || 'Unknown task';
-      const issueNumber = issueOpened?.content?.data?.issue_number;
-      const issueTitle = issueOpened?.content?.data?.title || 'Implementation';
-
-      // Find what's been done
-      const agentOutputs = messages.filter((m) => m.topic === 'AGENT_OUTPUT');
-      const validations = messages.filter((m) => m.topic === 'VALIDATION_RESULT');
-
-      // Build context summary
-      let contextSummary = `# Original Task\n\n${taskText}\n\n`;
-
-      if (issueNumber) {
-        contextSummary += `Issue: #${issueNumber} - ${issueTitle}\n\n`;
-      }
-
-      contextSummary += `# Progress So Far\n\n`;
-      contextSummary += `- ${agentOutputs.length} agent outputs\n`;
-      contextSummary += `- ${validations.length} validation results\n`;
-
-      const approvedValidations = validations.filter(
-        (v) => v.content?.data?.approved === true || v.content?.data?.approved === 'true'
-      );
-      contextSummary += `- ${approvedValidations.length} approvals\n\n`;
-
-      // Add recent validation summaries
-      if (validations.length > 0) {
-        contextSummary += `## Recent Validations\n\n`;
-        for (const v of validations.slice(-3)) {
-          const approved =
-            v.content?.data?.approved === true || v.content?.data?.approved === 'true';
-          const icon = approved ? '✅' : '❌';
-          contextSummary += `${icon} **${v.sender}**: ${v.content?.data?.summary || 'No summary'}\n`;
-        }
-        contextSummary += '\n';
-      }
-
-      // Build ultra-aggressive completion prompt (always merges)
-      const mergeGoal = 'CREATE PR AND MERGE IT';
-      const mergeStep = `
-8. MERGE THE PR - THIS IS MANDATORY:
-   \`\`\`bash
-   gh pr merge --merge --auto
-   \`\`\`
-
-   IF MERGE FAILS DUE TO CONFLICTS:
-   a) Pull and rebase: \`git fetch origin main && git rebase origin/main\`
-   b) Resolve conflicts manually (read files, make decisions, edit)
-   c) \`git add <resolved-files> && git rebase --continue\`
-   d) Force push: \`git push --force-with-lease\`
-   e) Retry merge: \`gh pr merge --merge\`
-
-   REPEAT UNTIL MERGED. DO NOT GIVE UP.`;
-
-      const completionPrompt = `# YOUR MISSION: ${mergeGoal}
-
-${contextSummary}
-
-# WHAT YOU MUST DO NOW
-
-You are the FINISHER. Your ONLY job is to take this cluster's work and push it across the finish line.
-
-**FAILURE IS NOT AN OPTION. YOU MUST COMPLETE THIS TASK.**
-
-## Steps (MUST complete ALL):
-
-1. REVIEW CURRENT STATE - Check git status, see what's changed:
-   \`\`\`bash
-   git status
-   git diff
-   \`\`\`
-
-2. COMMIT ALL CHANGES - Stage and commit everything:
-   \`\`\`bash
-   git add .
-   git commit -m "${issueTitle || 'feat: implement task'}"
-   \`\`\`
-
-3. CREATE BRANCH - Use issue number if available:
-   \`\`\`bash
-   ${issueNumber ? `git checkout -b issue-${issueNumber}` : 'git checkout -b feature/implementation'}
-   \`\`\`
-
-4. PUSH TO REMOTE:
-   \`\`\`bash
-   git push -u origin HEAD
-   \`\`\`
-
-5. CREATE PULL REQUEST:
-   \`\`\`bash
-   gh pr create --title "${issueTitle || 'Implementation'}" --body "Closes #${issueNumber || 'N/A'}
-
-## Summary
-${taskText.slice(0, 200)}...
-
-## Changes
-- Implementation complete
-- All validations addressed
-
-🤖 Generated with zeroshot finish"
-   \`\`\`
-
-6. GET PR URL:
-   \`\`\`bash
-   gh pr view --json url -q .url
-   \`\`\`
-
-7. OUTPUT THE PR URL - Print it clearly so user can see it
-${mergeStep}
-
-## RULES
-
-- NO EXCUSES: If something fails, FIX IT and retry
-- NO SHORTCUTS: Follow ALL steps above
-- NO PARTIAL WORK: Must reach PR creation and merge
-- IF TESTS FAIL: Fix them until they pass
-- IF CI FAILS: Wait for it, fix issues, retry
-- IF CONFLICTS: Resolve them intelligently
-
-**DO NOT STOP UNTIL YOU HAVE A MERGED PR.**`;
-
-      // Show preview
-      console.log(chalk.dim('='.repeat(80)));
-      console.log(chalk.dim('Task prompt preview:'));
-      console.log(chalk.dim('='.repeat(80)));
-      console.log(completionPrompt.split('\n').slice(0, 20).join('\n'));
-      console.log(chalk.dim('... (truncated) ...\n'));
-      console.log(chalk.dim('='.repeat(80)));
-      console.log('');
+      const context = extractFinishContext(messages);
+      const contextSummary = buildContextSummary(context);
+      const completionPrompt = buildCompletionPrompt({
+        contextSummary,
+        taskText: context.taskText,
+        issueNumber: context.issueNumber,
+        issueTitle: context.issueTitle,
+      });
+      printCompletionPromptPreview(completionPrompt);
 
       // Launch as task (preserve isolation if cluster was isolated)
       console.log(chalk.cyan('Launching completion task...'));
       const { runTask } = await import('../task-lib/commands/run.js');
-
-      const taskOptions = {
-        cwd: process.cwd(),
-      };
-
-      // If cluster was in isolation mode, pass container info to task
-      if (cluster.isolation?.enabled && cluster.isolation?.containerId) {
-        console.log(chalk.dim(`Using isolation container: ${cluster.isolation.containerId}`));
-        taskOptions.isolation = {
-          containerId: cluster.isolation.containerId,
-          workDir: '/workspace', // Standard workspace mount point in isolation containers
-        };
-      }
-
+      const taskOptions = buildFinishTaskOptions(cluster);
       await runTask(completionPrompt, taskOptions);
-
-      console.log('');
-      console.log(chalk.green(`✓ Completion task started`));
-      if (cluster.isolation?.enabled) {
-        console.log(chalk.dim('Running in isolation container (same as cluster)'));
-      }
-      console.log(chalk.dim('Monitor with: zeroshot list'));
+      printFinishTaskStarted(cluster);
     } catch (error) {
       console.error(chalk.red('Error:'), error.message);
       process.exit(1);
