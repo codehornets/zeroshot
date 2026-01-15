@@ -1368,6 +1368,260 @@ function showClusterLogsById(quietOrchestrator, id, options, limit) {
   }
 }
 
+async function listAttachableProcesses(socketDiscovery) {
+  const tasks = await socketDiscovery.listAttachableTasks();
+  const clusters = await socketDiscovery.listAttachableClusters();
+
+  if (tasks.length === 0 && clusters.length === 0) {
+    console.log(chalk.dim('No attachable tasks or clusters found.'));
+    console.log(chalk.dim('Start a task with: zeroshot task run "prompt"'));
+    return;
+  }
+
+  console.log(chalk.bold('\nAttachable processes:\n'));
+
+  if (tasks.length > 0) {
+    console.log(chalk.cyan('Tasks:'));
+    for (const taskId of tasks) {
+      console.log(`  ${taskId}`);
+    }
+  }
+
+  if (clusters.length > 0) {
+    await printAttachableClusters(clusters, socketDiscovery);
+  }
+
+  console.log(chalk.dim('\nUsage: zeroshot attach <id> [--agent <name>]'));
+}
+
+function getClusterAgentInfo(OrchestratorModule, clusterId) {
+  const agentModels = {};
+  let tokenUsageLines = null;
+  try {
+    const orchestrator = OrchestratorModule.getInstance();
+    const status = orchestrator.getStatus(clusterId);
+    for (const agent of status.agents) {
+      agentModels[agent.id] = agent.model;
+    }
+    const cluster = orchestrator.getCluster(clusterId);
+    if (cluster?.messageBus) {
+      const tokensByRole = cluster.messageBus.getTokensByRole(clusterId);
+      tokenUsageLines = formatTokenUsage(tokensByRole);
+    }
+  } catch {
+    /* orchestrator not running - models/tokens unavailable */
+  }
+  return { agentModels, tokenUsageLines };
+}
+
+async function printAttachableClusters(clusters, socketDiscovery) {
+  console.log(chalk.yellow('\nClusters:'));
+  const OrchestratorModule = require('../src/orchestrator');
+  for (const clusterId of clusters) {
+    const agents = await socketDiscovery.listAttachableAgents(clusterId);
+    console.log(`  ${clusterId}`);
+    const { agentModels, tokenUsageLines } = getClusterAgentInfo(OrchestratorModule, clusterId);
+    if (tokenUsageLines) {
+      for (const line of tokenUsageLines) {
+        console.log(`    ${line}`);
+      }
+    }
+    for (const agent of agents) {
+      const modelLabel = agentModels[agent] ? chalk.dim(` [${agentModels[agent]}]`) : '';
+      console.log(chalk.dim(`    --agent ${agent}`) + modelLabel);
+    }
+  }
+}
+
+function readClusterFromDisk(id) {
+  const clustersFile = path.join(os.homedir(), '.zeroshot', 'clusters.json');
+  try {
+    const clusters = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+    return clusters[id] || null;
+  } catch {
+    return null;
+  }
+}
+
+function ensureClusterRunning(cluster, id) {
+  if (!cluster) {
+    console.error(chalk.red(`Cluster ${id} not found`));
+    process.exit(1);
+  }
+  if (cluster.state !== 'running') {
+    console.error(chalk.red(`Cluster ${id} is not running (state: ${cluster.state})`));
+    console.error(chalk.dim('Only running clusters have attachable agents.'));
+    process.exit(1);
+  }
+}
+
+function getActiveAgents(status) {
+  return status.agents.filter((agent) => ACTIVE_STATES.has(agent.state));
+}
+
+function reportNoActiveAgents(status, id) {
+  console.error(chalk.yellow(`No agents currently executing tasks in cluster ${id}`));
+  console.log(chalk.dim('\nAgent states:'));
+  for (const agent of status.agents) {
+    const modelLabel = agent.model ? chalk.dim(` [${agent.model}]`) : '';
+    console.log(
+      chalk.dim(
+        `  ${agent.id}${modelLabel}: ${agent.state}${agent.currentTaskId ? ` (last task: ${agent.currentTaskId})` : ''}`
+      )
+    );
+  }
+}
+
+function printAttachableAgentList(id, activeAgents) {
+  console.log(chalk.yellow(`\nCluster ${id} - attachable agents:\n`));
+  for (const agent of activeAgents) {
+    const modelLabel = agent.model ? chalk.dim(` [${agent.model}]`) : '';
+    if (agent.currentTaskId) {
+      console.log(
+        `  ${chalk.cyan(agent.id)}${modelLabel} → task ${chalk.green(agent.currentTaskId)}`
+      );
+      console.log(chalk.dim(`    zeroshot attach ${agent.currentTaskId}`));
+    } else {
+      console.log(`  ${chalk.cyan(agent.id)}${modelLabel} → ${chalk.yellow('starting...')}`);
+      console.log(chalk.dim(`    (task ID not yet assigned, try again in a moment)`));
+    }
+  }
+  console.log(chalk.dim('\nAttach to an agent by running: zeroshot attach <taskId>'));
+}
+
+function reportMissingAgent(agentName, status) {
+  console.error(chalk.red(`Agent '${agentName}' not found in cluster`));
+  console.log(chalk.dim('Available agents: ' + status.agents.map((a) => a.id).join(', ')));
+  process.exit(1);
+}
+
+function reportAgentWithoutTask(agent, agentName) {
+  if (ACTIVE_STATES.has(agent.state)) {
+    console.error(
+      chalk.yellow(
+        `Agent '${agentName}' is working (state: ${agent.state}, task ID not yet assigned)`
+      )
+    );
+    console.log(chalk.dim('Try again in a moment...'));
+    return;
+  }
+  console.error(chalk.yellow(`Agent '${agentName}' is not currently running a task`));
+  console.log(chalk.dim(`State: ${agent.state}`));
+}
+
+async function reportClusterStatusUnavailable(err, socketDiscovery) {
+  console.error(chalk.yellow(`Could not get cluster status: ${err.message}`));
+  console.log(chalk.dim('Try attaching directly to a task ID instead: zeroshot attach <taskId>'));
+
+  const tasks = await socketDiscovery.listAttachableTasks();
+  if (tasks.length === 0) {
+    return;
+  }
+  console.log(chalk.dim('\nAttachable tasks:'));
+  for (const taskId of tasks) {
+    console.log(chalk.dim(`  zeroshot attach ${taskId}`));
+  }
+}
+
+async function resolveClusterSocketPath(id, options, socketDiscovery) {
+  const cluster = readClusterFromDisk(id);
+  ensureClusterRunning(cluster, id);
+
+  const orchestrator = await Orchestrator.create({ quiet: true });
+  try {
+    const status = orchestrator.getStatus(id);
+    const activeAgents = getActiveAgents(status);
+    if (activeAgents.length === 0) {
+      reportNoActiveAgents(status, id);
+      return null;
+    }
+
+    if (!options.agent) {
+      printAttachableAgentList(id, activeAgents);
+      return null;
+    }
+
+    const agent = status.agents.find((item) => item.id === options.agent);
+    if (!agent) {
+      reportMissingAgent(options.agent, status);
+      return null;
+    }
+
+    if (!agent.currentTaskId) {
+      reportAgentWithoutTask(agent, options.agent);
+      return null;
+    }
+
+    console.log(
+      chalk.dim(`Attaching to agent ${options.agent} via task ${agent.currentTaskId}...`)
+    );
+    return socketDiscovery.getTaskSocketPath(agent.currentTaskId);
+  } catch (err) {
+    await reportClusterStatusUnavailable(err, socketDiscovery);
+    return null;
+  }
+}
+
+function resolveAttachSocketPath(id, options, socketDiscovery) {
+  if (id.startsWith('task-')) {
+    return socketDiscovery.getTaskSocketPath(id);
+  }
+  if (id.startsWith('cluster-') || socketDiscovery.isKnownCluster(id)) {
+    return resolveClusterSocketPath(id, options, socketDiscovery);
+  }
+  return socketDiscovery.getSocketPath(id, options.agent);
+}
+
+function reportCannotAttach(id) {
+  console.error(chalk.red(`Cannot attach to ${id}`));
+
+  const { detectIdType } = require('../lib/id-detector');
+  const type = detectIdType(id);
+
+  if (type === 'task') {
+    console.error(chalk.dim('Task may have been spawned before attach support was added.'));
+    console.error(chalk.dim(`Try: zeroshot logs ${id} -f`));
+    return;
+  }
+  if (type === 'cluster') {
+    console.error(chalk.dim('Cluster may not be running or agent may not exist.'));
+    console.error(chalk.dim(`Check status: zeroshot status ${id}`));
+    return;
+  }
+  console.error(chalk.dim('Process not found or not attachable.'));
+}
+
+async function connectAttachClient({ AttachClient, socketPath, id, agentName }) {
+  console.log(chalk.dim(`Attaching to ${id}${agentName ? ` (agent: ${agentName})` : ''}...`));
+  console.log(chalk.dim('Press Ctrl+B ? for help, Ctrl+B d to detach\n'));
+
+  const client = new AttachClient({ socketPath });
+  client.on('state', (_state) => {
+    // Could show status bar here in future
+  });
+  client.on('exit', ({ code, signal }) => {
+    console.log(chalk.dim(`\n\nProcess exited (code: ${code}, signal: ${signal})`));
+    process.exit(code || 0);
+  });
+  client.on('error', (err) => {
+    console.error(chalk.red(`\nConnection error: ${err.message}`));
+    process.exit(1);
+  });
+  client.on('detach', () => {
+    console.log(chalk.dim('\n\nDetached. Task continues running.'));
+    console.log(
+      chalk.dim(`Re-attach: zeroshot attach ${id}${agentName ? ` --agent ${agentName}` : ''}`)
+    );
+    process.exit(0);
+  });
+  client.on('close', () => {
+    console.log(chalk.dim('\n\nConnection closed.'));
+    process.exit(0);
+  });
+
+  await client.connect();
+}
+
 // Lazy-loaded orchestrator (quiet by default) - created on first use
 /** @type {import('../src/orchestrator') | null} */
 let _orchestrator = null;
@@ -2035,255 +2289,28 @@ Key bindings:
     try {
       const { AttachClient, socketDiscovery } = require('../src/attach');
 
-      // If no ID provided, list attachable processes
       if (!id) {
-        const tasks = await socketDiscovery.listAttachableTasks();
-        const clusters = await socketDiscovery.listAttachableClusters();
-
-        if (tasks.length === 0 && clusters.length === 0) {
-          console.log(chalk.dim('No attachable tasks or clusters found.'));
-          console.log(chalk.dim('Start a task with: zeroshot task run "prompt"'));
-          return;
-        }
-
-        console.log(chalk.bold('\nAttachable processes:\n'));
-
-        if (tasks.length > 0) {
-          console.log(chalk.cyan('Tasks:'));
-          for (const taskId of tasks) {
-            console.log(`  ${taskId}`);
-          }
-        }
-
-        if (clusters.length > 0) {
-          console.log(chalk.yellow('\nClusters:'));
-          const OrchestratorModule = require('../src/orchestrator');
-          for (const clusterId of clusters) {
-            const agents = await socketDiscovery.listAttachableAgents(clusterId);
-            console.log(`  ${clusterId}`);
-            // Get agent models and token usage from orchestrator (if available)
-            let agentModels = {};
-            let tokenUsageLines = null;
-            try {
-              const orchestrator = OrchestratorModule.getInstance();
-              const status = orchestrator.getStatus(clusterId);
-              for (const a of status.agents) {
-                agentModels[a.id] = a.model;
-              }
-              // Get token usage from message bus
-              const cluster = orchestrator.getCluster(clusterId);
-              if (cluster?.messageBus) {
-                const tokensByRole = cluster.messageBus.getTokensByRole(clusterId);
-                tokenUsageLines = formatTokenUsage(tokensByRole);
-              }
-            } catch {
-              /* orchestrator not running - models/tokens unavailable */
-            }
-            // Display token usage if available
-            if (tokenUsageLines) {
-              for (const line of tokenUsageLines) {
-                console.log(`    ${line}`);
-              }
-            }
-            for (const agent of agents) {
-              const modelLabel = agentModels[agent] ? chalk.dim(` [${agentModels[agent]}]`) : '';
-              console.log(chalk.dim(`    --agent ${agent}`) + modelLabel);
-            }
-          }
-        }
-
-        console.log(chalk.dim('\nUsage: zeroshot attach <id> [--agent <name>]'));
+        await listAttachableProcesses(socketDiscovery);
         return;
       }
 
-      // Determine socket path
-      let socketPath;
-
-      if (id.startsWith('task-')) {
-        socketPath = socketDiscovery.getTaskSocketPath(id);
-      } else if (id.startsWith('cluster-') || socketDiscovery.isKnownCluster(id)) {
-        // Clusters use the task system - each agent spawns a task with its own socket
-        // Get cluster status to find which task each agent is running
-        const clustersFile = path.join(os.homedir(), '.zeroshot', 'clusters.json');
-        let cluster;
-        try {
-          const clusters = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
-          cluster = clusters[id];
-        } catch {
-          cluster = null;
-        }
-
-        if (!cluster) {
-          console.error(chalk.red(`Cluster ${id} not found`));
-          process.exit(1);
-        }
-
-        if (cluster.state !== 'running') {
-          console.error(chalk.red(`Cluster ${id} is not running (state: ${cluster.state})`));
-          console.error(chalk.dim('Only running clusters have attachable agents.'));
-          process.exit(1);
-        }
-
-        // Create orchestrator instance to query agent states
-        // This loads the cluster from disk including its ledger and agents
-        const orchestrator = await Orchestrator.create({ quiet: true });
-
-        try {
-          const status = orchestrator.getStatus(id);
-          // Agent is "active" if in any working state
-          // Note: currentTaskId may be null briefly between TASK_STARTED and TASK_ID_ASSIGNED
-          const activeAgents = status.agents.filter((a) => ACTIVE_STATES.has(a.state));
-
-          if (activeAgents.length === 0) {
-            console.error(chalk.yellow(`No agents currently executing tasks in cluster ${id}`));
-            console.log(chalk.dim('\nAgent states:'));
-            for (const agent of status.agents) {
-              const modelLabel = agent.model ? chalk.dim(` [${agent.model}]`) : '';
-              console.log(
-                chalk.dim(
-                  `  ${agent.id}${modelLabel}: ${agent.state}${agent.currentTaskId ? ` (last task: ${agent.currentTaskId})` : ''}`
-                )
-              );
-            }
-            return;
-          }
-
-          if (!options.agent) {
-            // Show list of agents and their task IDs
-            console.log(chalk.yellow(`\nCluster ${id} - attachable agents:\n`));
-            for (const agent of activeAgents) {
-              const modelLabel = agent.model ? chalk.dim(` [${agent.model}]`) : '';
-              if (agent.currentTaskId) {
-                console.log(
-                  `  ${chalk.cyan(agent.id)}${modelLabel} → task ${chalk.green(agent.currentTaskId)}`
-                );
-                console.log(chalk.dim(`    zeroshot attach ${agent.currentTaskId}`));
-              } else {
-                // Task ID not yet assigned (Claude CLI still starting)
-                console.log(
-                  `  ${chalk.cyan(agent.id)}${modelLabel} → ${chalk.yellow('starting...')}`
-                );
-                console.log(chalk.dim(`    (task ID not yet assigned, try again in a moment)`));
-              }
-            }
-            console.log(chalk.dim('\nAttach to an agent by running: zeroshot attach <taskId>'));
-            return;
-          }
-
-          // Find the specified agent
-          const agent = status.agents.find((a) => a.id === options.agent);
-          if (!agent) {
-            console.error(chalk.red(`Agent '${options.agent}' not found in cluster ${id}`));
-            console.log(
-              chalk.dim('Available agents: ' + status.agents.map((a) => a.id).join(', '))
-            );
-            process.exit(1);
-          }
-
-          if (!agent.currentTaskId) {
-            if (ACTIVE_STATES.has(agent.state)) {
-              // Agent is working but task ID not yet assigned
-              console.error(
-                chalk.yellow(
-                  `Agent '${options.agent}' is working (state: ${agent.state}, task ID not yet assigned)`
-                )
-              );
-              console.log(chalk.dim('Try again in a moment...'));
-            } else {
-              console.error(
-                chalk.yellow(`Agent '${options.agent}' is not currently running a task`)
-              );
-              console.log(chalk.dim(`State: ${agent.state}`));
-            }
-            return;
-          }
-
-          // Use the agent's task socket
-          socketPath = socketDiscovery.getTaskSocketPath(agent.currentTaskId);
-          console.log(
-            chalk.dim(`Attaching to agent ${options.agent} via task ${agent.currentTaskId}...`)
-          );
-        } catch (err) {
-          // Orchestrator not running or cluster not loaded - fall back to socket discovery
-          console.error(chalk.yellow(`Could not get cluster status: ${err.message}`));
-          console.log(
-            chalk.dim('Try attaching directly to a task ID instead: zeroshot attach <taskId>')
-          );
-
-          // Try to find any task sockets that might belong to this cluster
-          const tasks = await socketDiscovery.listAttachableTasks();
-          if (tasks.length > 0) {
-            console.log(chalk.dim('\nAttachable tasks:'));
-            for (const taskId of tasks) {
-              console.log(chalk.dim(`  zeroshot attach ${taskId}`));
-            }
-          }
-          return;
-        }
-      } else {
-        // Try to auto-detect
-        socketPath = socketDiscovery.getSocketPath(id, options.agent);
+      const socketPath = await resolveAttachSocketPath(id, options, socketDiscovery);
+      if (!socketPath) {
+        return;
       }
 
-      // Check if socket exists
       const socketAlive = await socketDiscovery.isSocketAlive(socketPath);
       if (!socketAlive) {
-        console.error(chalk.red(`Cannot attach to ${id}`));
-
-        // Check if it's an old task without attach support
-        const { detectIdType } = require('../lib/id-detector');
-        const type = detectIdType(id);
-
-        if (type === 'task') {
-          console.error(chalk.dim('Task may have been spawned before attach support was added.'));
-          console.error(chalk.dim(`Try: zeroshot logs ${id} -f`));
-        } else if (type === 'cluster') {
-          console.error(chalk.dim('Cluster may not be running or agent may not exist.'));
-          console.error(chalk.dim(`Check status: zeroshot status ${id}`));
-        } else {
-          console.error(chalk.dim('Process not found or not attachable.'));
-        }
+        reportCannotAttach(id);
         process.exit(1);
       }
 
-      // Connect
-      console.log(
-        chalk.dim(`Attaching to ${id}${options.agent ? ` (agent: ${options.agent})` : ''}...`)
-      );
-      console.log(chalk.dim('Press Ctrl+B ? for help, Ctrl+B d to detach\n'));
-
-      const client = new AttachClient({ socketPath });
-
-      client.on('state', (_state) => {
-        // Could show status bar here in future
+      await connectAttachClient({
+        AttachClient,
+        socketPath,
+        id,
+        agentName: options.agent,
       });
-
-      client.on('exit', ({ code, signal }) => {
-        console.log(chalk.dim(`\n\nProcess exited (code: ${code}, signal: ${signal})`));
-        process.exit(code || 0);
-      });
-
-      client.on('error', (err) => {
-        console.error(chalk.red(`\nConnection error: ${err.message}`));
-        process.exit(1);
-      });
-
-      client.on('detach', () => {
-        console.log(chalk.dim('\n\nDetached. Task continues running.'));
-        console.log(
-          chalk.dim(
-            `Re-attach: zeroshot attach ${id}${options.agent ? ` --agent ${options.agent}` : ''}`
-          )
-        );
-        process.exit(0);
-      });
-
-      client.on('close', () => {
-        console.log(chalk.dim('\n\nConnection closed.'));
-        process.exit(0);
-      });
-
-      await client.connect();
     } catch (error) {
       console.error(chalk.red(`Error attaching: ${error.message}`));
       process.exit(1);
